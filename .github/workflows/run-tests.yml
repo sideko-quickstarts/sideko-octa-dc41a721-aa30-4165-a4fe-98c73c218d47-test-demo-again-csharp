@@ -1,0 +1,57 @@
+name: Run Tests
+on:
+  push:
+    branches:
+      - main
+  pull_request: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: |
+          6.0.x
+          7.0.x
+          8.0.x
+
+    - name: Restore, build, and test
+      run: |
+        # Check if solution file exists
+        if ls *.sln 1> /dev/null 2>&1; then
+          echo "Found solution file, using it for restore and build"
+          dotnet restore
+          dotnet build --configuration Release --no-restore
+          dotnet test --configuration Release --no-build --verbosity normal
+        else
+          echo "No solution file found, discovering projects individually"
+          
+          # Find and restore all projects
+          find . -name "*.csproj" -type f | while read proj; do
+            echo "Restoring $proj"
+            dotnet restore "$proj"
+          done
+          
+          # Find and build all projects
+          find . -name "*.csproj" -type f | while read proj; do
+            echo "Building $proj"
+            dotnet build "$proj" --configuration Release --no-restore
+          done
+          
+          # Find and test all test projects
+          find . -name "*.csproj" -type f | while read proj; do
+            projdir=$(dirname "$proj")
+            projname=$(basename "$proj" .csproj)
+            
+            # Check if this looks like a test project
+            if [[ "$projdir" == *"Test"* ]] || [[ "$projname" == *"Test"* ]]; then
+              echo "Testing $proj"
+              dotnet test "$proj" --configuration Release --no-build --verbosity normal
+            fi
+          done
+        fi

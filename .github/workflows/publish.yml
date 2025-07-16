@@ -1,0 +1,86 @@
+name: Publish to NuGet
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: |
+          6.0.x
+          7.0.x
+          8.0.x
+
+    - name: Build and Pack Non-Test Projects
+      run: |
+        mkdir -p ./nupkgs
+
+        # Check if solution file exists
+        if ls *.sln 1> /dev/null 2>&1; then
+          echo "Found solution file, using it for restore and build"
+          dotnet restore
+          dotnet build --configuration Release --no-restore
+
+          # Pack only non-test projects in solution
+          echo "Packing non-test projects from solution"
+          find . -name "*.csproj" -type f | while read proj; do
+            projdir=$(dirname "$proj")
+            projname=$(basename "$proj")
+            if [[ "$projdir" != *Test ]] && [[ "$projname" != *Test.csproj ]]; then
+              echo "Packing $proj"
+              dotnet pack "$proj" --configuration Release --no-build --output ./nupkgs
+            else
+              echo "Skipping test project $proj"
+            fi
+          done
+        else
+          echo "No solution file found, discovering projects individually"
+
+          # Restore all non-test projects
+          find . -name "*.csproj" -type f | while read proj; do
+            projdir=$(dirname "$proj")
+            projname=$(basename "$proj")
+            if [[ "$projdir" != *Test ]] && [[ "$projname" != *Test.csproj ]]; then
+              echo "Restoring $proj"
+              dotnet restore "$proj"
+            fi
+          done
+
+          # Build all non-test projects
+          find . -name "*.csproj" -type f | while read proj; do
+            projdir=$(dirname "$proj")
+            projname=$(basename "$proj")
+            if [[ "$projdir" != *Test ]] && [[ "$projname" != *Test.csproj ]]; then
+              echo "Building $proj"
+              dotnet build "$proj" --configuration Release --no-restore
+            fi
+          done
+
+          # Pack all non-test projects
+          find . -name "*.csproj" -type f | while read proj; do
+            projdir=$(dirname "$proj")
+            projname=$(basename "$proj")
+            if [[ "$projdir" != *Test ]] && [[ "$projname" != *Test.csproj ]]; then
+              echo "Packing $proj"
+              dotnet pack "$proj" --configuration Release --no-build --output ./nupkgs
+            else
+              echo "Skipping test project $proj"
+            fi
+          done
+        fi
+
+    - name: Publish to NuGet
+      run: |
+        echo "Pushing packages to NuGet..."
+        dotnet nuget push ./nupkgs/*.nupkg \
+          --api-key ${{ secrets.NUGET_APIKEY }} \
+          --source https://api.nuget.org/v3/index.json \
+          --skip-duplicate
